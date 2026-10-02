@@ -2,6 +2,9 @@
 # CMakeLists in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.22)
 
+set(CMAKE_CXX_STANDARD 26)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 list(APPEND EXTRA_COMPONENT_DIRS "deps")

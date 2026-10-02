@@ -1,7 +1,6 @@
 CompileFlags:
   CompilationDatabase: build/
-  Remove: [-f*, -m*, -std=gnu23]
-  Add: [-x, c++-header, -std=c++26]
+  Remove: [-f*, -m*]
 
 InlayHints:
     ParameterNames: No

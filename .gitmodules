@@ -1,0 +1,6 @@
+[submodule "deps/espbase"]
+	path = deps/espbase
+	url = https://github.com/tapted/espbase
+[submodule "deps/halpp"]
+	path = deps/halpp
+	url = https://github.com/tapted/halpp

@@ -1,0 +1,31 @@
+---
+Language: Cpp
+BasedOnStyle: Google
+
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+# --- Header Sorting Magic ---
+# true: Sorts alphabetically within blocks
+SortIncludes: true 
+
+# Strips the underscore and everything after it from the filename stem before matching
+IncludeIsMainRegex : '(_test|_sdl|_esp32)?$'
+
+# Regroup: Merges all includes, sorts them, and separates categories with a blank line
+IncludeBlocks: Regroup 
+
+# 1. Wrap lines at 100 characters
+ColumnLimit: 100
+
+# 2. Prevent one-liner functions (forces a newline after the opening brace)
+AllowShortFunctionsOnASingleLine: InlineOnly
+
+# Explicitly define the hierarchy (0 is top, 3 is bottom)
+IncludeCategories:
+  # 1. System Headers (<vector>, <string>, etc.)
+  - Regex:           '^<.*>'
+    Priority:        1
+  # 2. Project Headers ("my_header.h")
+  - Regex:           '^".*"'
+    Priority:        2

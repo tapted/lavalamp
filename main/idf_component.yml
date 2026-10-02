@@ -1,0 +1,6 @@
+dependencies:
+  lvgl/lvgl: ^9.5.*
+  
+  espressif/esp_lcd_st77916: ^2.0.*
+  espressif/esp_io_expander_tca9554: ^2.0.*
+  espressif/esp_lcd_touch_cst816s: ^1.1.*

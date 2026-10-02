@@ -1,7 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstring>  // for memset
+#include <cstring>
 #include <vector>
 
 #include "halpp/config.hpp"
@@ -12,8 +12,7 @@ constexpr int CENTER_X = 180;
 constexpr int CENTER_Y = 180;
 constexpr int RADIUS = 180;
 
-// Tile grid settings
-constexpr int TILE_SIZE = 30;  // 30x30 = 900 pixels (fits perfectly in fast RAM)
+constexpr int TILE_SIZE = 30;
 constexpr int GRID_W = SCREEN_WIDTH / TILE_SIZE;
 constexpr int GRID_H = SCREEN_HEIGHT / TILE_SIZE;
 
@@ -26,7 +25,7 @@ constexpr uint16_t rgbTo565(uint8_t r, uint8_t g, uint8_t b) {
     return rgb;
   }
 }
-
+// Bayer matrix for perfectly smooth gradients on 16-bit displays
 const uint8_t bayer4x4[4][4] = {
     {0, 8, 2, 10},
     {12, 4, 14, 6},
@@ -34,101 +33,97 @@ const uint8_t bayer4x4[4][4] = {
     {15, 7, 13, 5},
 };
 
-struct Rect {
-  int x, y, w, h;
-};
+// Lerp helper for smooth color transitions
+inline int lerp(int a, int b, float t) {
+  return a + (b - a) * t;
+}
 
 struct Blob {
   float x, y;
   float vx, vy;
   float radius;
-  uint8_t baseR, baseG, baseB;
+  float rSq, invRSq;  // Pre-calculated for speed
 
-  Rect getBoundingBox() const {
-    // Tightened margin to reduce unnecessary dirty tiles
-    int margin = (int)(radius * 1.2f);
-    return Rect{(int)x - margin, (int)y - margin, (int)(margin * 2), (int)(margin * 2)};
+  void setRadius(float r) {
+    radius = r;
+    rSq = r * r;
+    invRSq = 1.0f / rSq;
   }
 };
 
 class LavaLampAnimator {
  private:
   std::vector<Blob> blobs;
-  bool dirtyGrid[GRID_H][GRID_W];
-  uint16_t renderBuffer[TILE_SIZE * TILE_SIZE];  // 1.8KB, lives in fast internal RAM!
-
-  void markDirty(const Rect& r) {
-    // Convert rect bounds to grid coordinates and clamp to screen
-    int startX = std::max(0, r.x / TILE_SIZE);
-    int startY = std::max(0, r.y / TILE_SIZE);
-    int endX = std::min(GRID_W - 1, (r.x + r.w - 1) / TILE_SIZE);
-    int endY = std::min(GRID_H - 1, (r.y + r.h - 1) / TILE_SIZE);
-
-    for (int y = startY; y <= endY; ++y) {
-      for (int x = startX; x <= endX; ++x) {
-        dirtyGrid[y][x] = true;
-      }
-    }
-  }
+  bool previousLava[GRID_H][GRID_W];
+  uint16_t renderBuffer[TILE_SIZE * TILE_SIZE];
+  float speedScale = 0.3f;  // 1.0 is normal, 0.5 is half speed, 0.2 is very slow
 
  public:
-  LavaLampAnimator(int numBlobs = 4) {
+  LavaLampAnimator(int numBlobs = 5, float speedScale_ = 0.3f) {
     for (int i = 0; i < numBlobs; ++i) {
       Blob b;
-      b.x = CENTER_X + (rand() % 100 - 50);
-      b.y = CENTER_Y + (rand() % 100 - 50);
-      b.vx = (float)(rand() % 20 - 10) / 10.0f;
+      // Spread blobs vertically like a real lava lamp
+      b.x = CENTER_X + (rand() % 60 - 30);
+      b.y = CENTER_Y + (rand() % 200 - 100);
+      b.vx = (float)(rand() % 10 - 5) / 15.0f;
       b.vy = (float)(rand() % 20 - 10) / 10.0f;
-      b.radius = 45.0f + (rand() % 25);  // Slightly smaller to prevent full-screen fills
 
-      b.baseR = 200 + (rand() % 55);
-      b.baseG = 20 + (rand() % 60);
-      b.baseB = 10;
-
+      // Mix of big main blobs and smaller break-off pieces
+      b.setRadius(50.0f + (rand() % 45));
       blobs.push_back(b);
     }
 
-    // Force full redraw on first frame
-    memset(dirtyGrid, 1, sizeof(dirtyGrid));
+    // Force full redraw on frame 1 to draw the background
+    memset(previousLava, 1, sizeof(previousLava));
+    speedScale = speedScale_;
   }
 
-  // Combines physics update and rendering to avoid holding state between calls
   template <typename DrawCallback>
   void updateAndRender(DrawCallback drawCallback) {
-    // 1. Mark current positions as dirty (to clear trails)
-    for (auto& blob : blobs) {
-      markDirty(blob.getBoundingBox());
-    }
+    bool currentLava[GRID_H][GRID_W] = {};
 
-    // 2. Update physics
+    // 1. Update Physics (Vertical Lava Flow)
     for (auto& blob : blobs) {
-      blob.x += blob.vx;
-      blob.y += blob.vy;
+      blob.x += (blob.vx * speedScale);
+      blob.y += (blob.vy * speedScale);
 
+      // Heat at bottom makes them rise, cooling at top makes them sink
+      if (blob.y < blob.radius) blob.vy += 0.05f;
+      if (blob.y > SCREEN_HEIGHT - blob.radius) blob.vy -= 0.05f;
+
+      // Keep horizontally contained
       float dx = blob.x - CENTER_X;
-      float dy = blob.y - CENTER_Y;
-      float distFromCenter = std::sqrt(dx * dx + dy * dy);
-
-      if (distFromCenter > (RADIUS - blob.radius)) {
-        blob.vx = -blob.vx + (rand() % 5 - 2) * 0.1f;
-        blob.vy = -blob.vy + (rand() % 5 - 2) * 0.1f;
+      if (std::abs(dx) > (RADIUS * 0.6f)) {
+        blob.vx -= (dx * 0.002f);
       }
 
-      // 3. Mark new positions as dirty
-      markDirty(blob.getBoundingBox());
-    }
+      // Enforce speed limits
+      blob.vy = std::clamp(blob.vy, -1.5f, 1.5f);
+      blob.vx = std::clamp(blob.vx, -0.5f, 0.5f);
 
-    // 4. Render only the tiles marked as dirty
-    for (int ty = 0; ty < GRID_H; ++ty) {
-      for (int tx = 0; tx < GRID_W; ++tx) {
-        if (dirtyGrid[ty][tx]) {
-          renderTile(tx, ty, drawCallback);
+      // 2. Mark intersecting tiles
+      int minTx = std::max(0, (int)(blob.x - blob.radius) / TILE_SIZE);
+      int maxTx = std::min(GRID_W - 1, (int)(blob.x + blob.radius) / TILE_SIZE);
+      int minTy = std::max(0, (int)(blob.y - blob.radius) / TILE_SIZE);
+      int maxTy = std::min(GRID_H - 1, (int)(blob.y + blob.radius) / TILE_SIZE);
+
+      for (int ty = minTy; ty <= maxTy; ++ty) {
+        for (int tx = minTx; tx <= maxTx; ++tx) {
+          currentLava[ty][tx] = true;
         }
       }
     }
 
-    // 5. Clear grid for next frame
-    memset(dirtyGrid, 0, sizeof(dirtyGrid));
+    // 3. Render tiles that either have lava now, OR had lava last frame (to clean up trails)
+    for (int ty = 0; ty < GRID_H; ++ty) {
+      for (int tx = 0; tx < GRID_W; ++tx) {
+        if (currentLava[ty][tx] || previousLava[ty][tx]) {
+          renderTile(tx, ty, drawCallback);
+        }
+        // Store state for next frame's trail cleanup
+        previousLava[ty][tx] = currentLava[ty][tx];
+      }
+    }
   }
 
  private:
@@ -146,56 +141,60 @@ class LavaLampAnimator {
       for (int px = 0; px < TILE_SIZE; ++px) {
         int x = rectX + px;
 
-        // Mask pixels outside the physical circular screen
+        // Mask pixels outside the circular screen
         int dx_center = x - CENTER_X;
         if ((dx_center * dx_center + dy_center_sq) > (RADIUS * RADIUS)) {
           renderBuffer[bufIdx++] = 0x0000;
           continue;
         }
 
-        // Metaball Field Calculation
+        // Calculate finite-support metaball field
         float field = 0.0f;
-        float accumR = 0.0f, accumG = 0.0f, accumB = 0.0f;
-
         for (const auto& blob : blobs) {
-          float distX = x - blob.x;
-          float distY = y - blob.y;
-          float distSq = distX * distX + distY * distY;
-          if (distSq < 1.0f) distSq = 1.0f;
+          float dx = x - blob.x;
+          float dy = y - blob.y;
+          float distSq = dx * dx + dy * dy;
 
-          float value = (blob.radius * blob.radius) / distSq;
-          field += value;
-
-          accumR += blob.baseR * value;
-          accumG += blob.baseG * value;
-          accumB += blob.baseB * value;
+          if (distSq < blob.rSq) {
+            // Wyvill-inspired polynomial curve. Bounded perfectly to radius!
+            float v = 1.0f - (distSq * blob.invRSq);
+            field += v * v * v;  // Smooth cubic falloff
+          }
         }
 
-        // Background gradient mapping
-        float bgFactor = (float)y / SCREEN_HEIGHT;
-        float finalR = 20 + bgFactor * 30;
-        float finalG = 10;
-        float finalB = 40 + (1.0f - bgFactor) * 50;
+        int r = 0, g = 0, b = 0;
 
-        // Thresholding/Blending
-        if (field > 0.8f) {
-          float normalize = 1.0f / field;
-          finalR = accumR * normalize;
-          finalG = accumG * normalize;
-          finalB = accumB * normalize;
+        // --- COLOR MAPPING PALETTE ---
+        if (field < 0.1f) {
+          // 1. Background gradient (Deep Purple to Black)
+          float bgMap = (float)y / SCREEN_HEIGHT;
+          r = lerp(30, 5, bgMap);
+          g = 0;
+          b = lerp(60, 15, bgMap);
+        } else if (field < 0.2f) {
+          // 2. Anti-aliased Lava Edge (Blend Background -> Deep Red)
+          float t = (field - 0.1f) / 0.1f;  // Normalize 0 to 1
+          r = lerp(30, 255, t);
+          g = lerp(0, 50, t);
+          b = lerp(60, 0, t);
+        } else {
+          // 3. Lava Core (Blend Deep Red -> Bright Yellow)
+          float t = std::min(1.0f, (field - 0.2f) / 0.8f);
+          r = 255;
+          g = lerp(50, 220, t);  // Pushes towards yellow
+          b = 0;
         }
 
-        // Bayer Dithering
-        int dither = (bayer4x4[y % 4][x % 4] - 8);
-        int r = std::clamp((int)finalR + dither, 0, 255);
-        int g = std::clamp((int)finalG + dither, 0, 255);
-        int b = std::clamp((int)finalB + dither, 0, 255);
+        // Dither and write
+        int dither = bayer4x4[y % 4][x % 4] - 8;
+        r = std::clamp(r + dither, 0, 255);
+        g = std::clamp(g + dither, 0, 255);
+        b = std::clamp(b + dither, 0, 255);
 
         renderBuffer[bufIdx++] = rgbTo565(r, g, b);
       }
     }
 
-    // Push the 30x30 chunk to the SPI bus
     drawCallback(rectX, rectY, TILE_SIZE, TILE_SIZE, renderBuffer);
   }
 };

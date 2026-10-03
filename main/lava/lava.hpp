@@ -2,19 +2,23 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <esp_random.h>
 #include <vector>
 
 #include "halpp/config.hpp"
 
-constexpr int SCREEN_WIDTH = 360;
-constexpr int SCREEN_HEIGHT = 360;
-constexpr int CENTER_X = 180;
-constexpr int CENTER_Y = 180;
-constexpr int RADIUS = 180;
+constexpr int SCREEN_WIDTH = halpp::config::Display::WIDTH;
+constexpr int SCREEN_HEIGHT = halpp::config::Display::HEIGHT;
+constexpr int CENTER_X = SCREEN_WIDTH / 2;
+constexpr int CENTER_Y = SCREEN_HEIGHT / 2;
+constexpr int RADIUS = SCREEN_WIDTH / 2;
 
-constexpr int TILE_SIZE = 30;
+constexpr int TILE_SIZE = 120;
 constexpr int GRID_W = SCREEN_WIDTH / TILE_SIZE;
 constexpr int GRID_H = SCREEN_HEIGHT / TILE_SIZE;
+
+static_assert(SCREEN_WIDTH % TILE_SIZE == 0, "SCREEN_WIDTH must be divisible by TILE_SIZE");
+static_assert(SCREEN_HEIGHT % TILE_SIZE == 0, "SCREEN_HEIGHT must be divisible by TILE_SIZE");
 
 constexpr uint16_t rgbTo565(uint8_t r, uint8_t g, uint8_t b) {
   uint16_t rgb = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
@@ -60,16 +64,22 @@ class LavaLampAnimator {
 
  public:
   LavaLampAnimator(int numBlobs = 5, float speedScale_ = 0.3f) {
+    // Define the bounding box for initial random placement
+    int spawnWidth = SCREEN_WIDTH / 2;
+    int spawnHeight = (SCREEN_HEIGHT * 3) / 4;
+
     for (int i = 0; i < numBlobs; ++i) {
       Blob b;
-      // Spread blobs vertically like a real lava lamp
-      b.x = CENTER_X + (rand() % 60 - 30);
-      b.y = CENTER_Y + (rand() % 200 - 100);
-      b.vx = (float)(rand() % 10 - 5) / 15.0f;
-      b.vy = (float)(rand() % 20 - 10) / 10.0f;
+
+      // Cast the esp_random() modulo result to a signed int before subtraction to prevent underflow
+      b.x = CENTER_X + (int)(esp_random() % spawnWidth) - (spawnWidth / 2);
+      b.y = CENTER_Y + (int)(esp_random() % spawnHeight) - (spawnHeight / 2);
+
+      b.vx = (float)((int)(esp_random() % 10) - 5) / 15.0f;
+      b.vy = (float)((int)(esp_random() % 20) - 10) / 10.0f;
 
       // Mix of big main blobs and smaller break-off pieces
-      b.setRadius(50.0f + (rand() % 45));
+      b.setRadius(50.0f + (esp_random() % 45));
       blobs.push_back(b);
     }
 

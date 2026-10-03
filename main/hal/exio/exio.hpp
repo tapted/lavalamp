@@ -5,20 +5,16 @@
 #include <esp_io_expander.h>
 
 #include "espbase/esp_result.hpp"
+#include "halpp/core/default_instance.hpp"
 
-namespace HAL {
+namespace halpp {
 
-class EXIO {
-  static esp_io_expander_handle_t handle;
-  esp_err_t init();
-  esp_err_t _deinit();
-
+class Exio : public halpp::DefaultInstance<Exio> {
  public:
-  static EXIO& instance() {
-    static EXIO inst;
-    return inst;
-  }
-  static esp_err_t deinit() { return handle ? instance()._deinit() : ESP_OK; }
+  Exio() = default;
+  ~Exio();
+
+  EspResult<> init();
 
   // pins: bitwise OR of IO_EXPANDER_PIN_NUM_XXX values.
   EspResult<> set_pins_mode(uint32_t pin_num_mask, esp_io_expander_dir_t dir);
@@ -54,8 +50,7 @@ class EXIO {
   EspResult<> write_pins(uint32_t pin_mask, uint32_t levels);
 
  private:
-  EXIO();
-  ~EXIO();
+  esp_io_expander_handle_t io_handle_ = nullptr;
 };
 
-}  // namespace HAL
+}  // namespace halpp

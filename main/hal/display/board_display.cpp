@@ -216,7 +216,7 @@ st77916_vendor_config_t st77916_vendor_config = {
 static uint64_t hardware_ready_time_us = 0;  // Future timestamp when hardware is ready after reset
 
 void start_reset_display_and_touch() {
-  HAL::EXIO& exio = HAL::EXIO::instance();
+  halpp::Exio& exio = halpp::Exio::autoinit_instance();
   using halpp::config;
 
   // Pull BOTH reset lines LOW simultaneously, wait, then push high.

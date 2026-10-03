@@ -1,8 +1,12 @@
+#pragma once
+
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <esp_random.h>
+#include <limits>
+#include <random>
 #include <vector>
 
 #include "halpp/config.hpp"
@@ -20,35 +24,37 @@ constexpr int GRID_H = SCREEN_HEIGHT / TILE_SIZE;
 static_assert(SCREEN_WIDTH % TILE_SIZE == 0, "SCREEN_WIDTH must be divisible by TILE_SIZE");
 static_assert(SCREEN_HEIGHT % TILE_SIZE == 0, "SCREEN_HEIGHT must be divisible by TILE_SIZE");
 
+// Modern standard-compliant URBG (Uniform Random Bit Generator) for esp_random
+struct EspRandomGenerator {
+  using result_type = uint32_t;
+  static constexpr result_type min() { return 0; }
+  static constexpr result_type max() { return std::numeric_limits<uint32_t>::max(); }
+  result_type operator()() const { return esp_random(); }
+};
+
 constexpr uint16_t rgbTo565(uint8_t r, uint8_t g, uint8_t b) {
-  uint16_t rgb = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+  uint16_t rgb = static_cast<uint16_t>(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 
   if (halpp::config::lvgl::USE_RGB565_SWAPPED) {
-    return rgb << 8 | (rgb >> 8);
-  } else {
-    return rgb;
+    return static_cast<uint16_t>((rgb << 8) | (rgb >> 8));
   }
+  return rgb;
 }
-// Bayer matrix for perfectly smooth gradients on 16-bit displays
-const uint8_t bayer4x4[4][4] = {
+
+constexpr std::array<std::array<int, 4>, 4> bayer4x4 = {{
     {0, 8, 2, 10},
     {12, 4, 14, 6},
     {3, 11, 1, 9},
     {15, 7, 13, 5},
-};
-
-// Lerp helper for smooth color transitions
-inline int lerp(int a, int b, float t) {
-  return a + (b - a) * t;
-}
+}};
 
 struct Blob {
-  float x, y;
-  float vx, vy;
-  float radius;
-  float rSq, invRSq;  // Pre-calculated for speed
+  float x{0.0f}, y{0.0f};
+  float vx{0.0f}, vy{0.0f};
+  float radius{0.0f};
+  float rSq{0.0f}, invRSq{0.0f};
 
-  void setRadius(float r) {
+  constexpr void setRadius(float r) noexcept {
     radius = r;
     rSq = r * r;
     invRSq = 1.0f / rSq;
@@ -58,39 +64,44 @@ struct Blob {
 class LavaLampAnimator {
  private:
   std::vector<Blob> blobs;
-  bool previousLava[GRID_H][GRID_W];
-  uint16_t renderBuffer[TILE_SIZE * TILE_SIZE];
-  float speedScale = 0.3f;  // 1.0 is normal, 0.5 is half speed, 0.2 is very slow
+  std::array<std::array<bool, GRID_W>, GRID_H> previousLava{};
+  std::array<uint16_t, TILE_SIZE * TILE_SIZE> renderBuffer{};
+  float speedScale{0.3f};
 
  public:
-  LavaLampAnimator(int numBlobs = 5, float speedScale_ = 0.3f) {
-    // Define the bounding box for initial random placement
-    int spawnWidth = SCREEN_WIDTH / 2;
-    int spawnHeight = (SCREEN_HEIGHT * 3) / 4;
+  explicit LavaLampAnimator(int numBlobs = 5, float speedScale_ = 0.3f) : speedScale{speedScale_} {
+    EspRandomGenerator gen;
 
+    // Use modern distribution classes instead of modulo arithmetic and casting
+    std::uniform_real_distribution<float> xDist(
+        static_cast<float>(CENTER_X) - (SCREEN_WIDTH * 0.25f),
+        static_cast<float>(CENTER_X) + (SCREEN_WIDTH * 0.25f));
+    std::uniform_real_distribution<float> yDist(
+        static_cast<float>(CENTER_Y) - (SCREEN_HEIGHT * 0.375f),
+        static_cast<float>(CENTER_Y) + (SCREEN_HEIGHT * 0.375f));
+    std::uniform_real_distribution<float> vxDist(-0.333f, 0.333f);
+    std::uniform_real_distribution<float> vyDist(-1.0f, 1.0f);
+    std::uniform_real_distribution<float> rDist(50.0f, 95.0f);
+
+    blobs.reserve(static_cast<size_t>(numBlobs));
     for (int i = 0; i < numBlobs; ++i) {
       Blob b;
-
-      // Cast the esp_random() modulo result to a signed int before subtraction to prevent underflow
-      b.x = CENTER_X + (int)(esp_random() % spawnWidth) - (spawnWidth / 2);
-      b.y = CENTER_Y + (int)(esp_random() % spawnHeight) - (spawnHeight / 2);
-
-      b.vx = (float)((int)(esp_random() % 10) - 5) / 15.0f;
-      b.vy = (float)((int)(esp_random() % 20) - 10) / 10.0f;
-
-      // Mix of big main blobs and smaller break-off pieces
-      b.setRadius(50.0f + (esp_random() % 45));
+      b.x = xDist(gen);
+      b.y = yDist(gen);
+      b.vx = vxDist(gen);
+      b.vy = vyDist(gen);
+      b.setRadius(rDist(gen));
       blobs.push_back(b);
     }
 
-    // Force full redraw on frame 1 to draw the background
-    memset(previousLava, 1, sizeof(previousLava));
-    speedScale = speedScale_;
+    for (auto& row : previousLava) {
+      std::ranges::fill(row, true);
+    }
   }
 
   template <typename DrawCallback>
   void updateAndRender(DrawCallback drawCallback) {
-    bool currentLava[GRID_H][GRID_W] = {};
+    std::array<std::array<bool, GRID_W>, GRID_H> currentLava{};
 
     // 1. Update Physics (Vertical Lava Flow)
     for (auto& blob : blobs) {
@@ -99,11 +110,11 @@ class LavaLampAnimator {
 
       // Heat at bottom makes them rise, cooling at top makes them sink
       if (blob.y < blob.radius) blob.vy += 0.05f;
-      if (blob.y > SCREEN_HEIGHT - blob.radius) blob.vy -= 0.05f;
+      if (blob.y > static_cast<float>(SCREEN_HEIGHT) - blob.radius) blob.vy -= 0.05f;
 
       // Keep horizontally contained
-      float dx = blob.x - CENTER_X;
-      if (std::abs(dx) > (RADIUS * 0.6f)) {
+      float dx = blob.x - static_cast<float>(CENTER_X);
+      if (std::abs(dx) > (static_cast<float>(RADIUS) * 0.6f)) {
         blob.vx -= (dx * 0.002f);
       }
 
@@ -112,10 +123,10 @@ class LavaLampAnimator {
       blob.vx = std::clamp(blob.vx, -0.5f, 0.5f);
 
       // 2. Mark intersecting tiles
-      int minTx = std::max(0, (int)(blob.x - blob.radius) / TILE_SIZE);
-      int maxTx = std::min(GRID_W - 1, (int)(blob.x + blob.radius) / TILE_SIZE);
-      int minTy = std::max(0, (int)(blob.y - blob.radius) / TILE_SIZE);
-      int maxTy = std::min(GRID_H - 1, (int)(blob.y + blob.radius) / TILE_SIZE);
+      int minTx = std::max(0, static_cast<int>((blob.x - blob.radius) / TILE_SIZE));
+      int maxTx = std::min(GRID_W - 1, static_cast<int>((blob.x + blob.radius) / TILE_SIZE));
+      int minTy = std::max(0, static_cast<int>((blob.y - blob.radius) / TILE_SIZE));
+      int maxTy = std::min(GRID_H - 1, static_cast<int>((blob.y + blob.radius) / TILE_SIZE));
 
       for (int ty = minTy; ty <= maxTy; ++ty) {
         for (int tx = minTx; tx <= maxTx; ++tx) {
@@ -141,7 +152,7 @@ class LavaLampAnimator {
   void renderTile(int tx, int ty, DrawCallback drawCallback) {
     int rectX = tx * TILE_SIZE;
     int rectY = ty * TILE_SIZE;
-    int bufIdx = 0;
+    size_t bufIdx = 0;
 
     for (int py = 0; py < TILE_SIZE; ++py) {
       int y = rectY + py;
@@ -161,8 +172,8 @@ class LavaLampAnimator {
         // Calculate finite-support metaball field
         float field = 0.0f;
         for (const auto& blob : blobs) {
-          float dx = x - blob.x;
-          float dy = y - blob.y;
+          float dx = static_cast<float>(x) - blob.x;
+          float dy = static_cast<float>(y) - blob.y;
           float distSq = dx * dx + dy * dy;
 
           if (distSq < blob.rSq) {
@@ -174,24 +185,23 @@ class LavaLampAnimator {
 
         int r = 0, g = 0, b = 0;
 
-        // --- COLOR MAPPING PALETTE ---
         if (field < 0.1f) {
           // 1. Background gradient (Deep Purple to Black)
-          float bgMap = (float)y / SCREEN_HEIGHT;
-          r = lerp(30, 5, bgMap);
+          float bgMap = static_cast<float>(y) / static_cast<float>(SCREEN_HEIGHT);
+          r = static_cast<int>(std::lerp(30.0f, 5.0f, bgMap));
           g = 0;
-          b = lerp(60, 15, bgMap);
+          b = static_cast<int>(std::lerp(60.0f, 15.0f, bgMap));
         } else if (field < 0.2f) {
           // 2. Anti-aliased Lava Edge (Blend Background -> Deep Red)
-          float t = (field - 0.1f) / 0.1f;  // Normalize 0 to 1
-          r = lerp(30, 255, t);
-          g = lerp(0, 50, t);
-          b = lerp(60, 0, t);
+          float t = (field - 0.1f) / 0.1f;
+          r = static_cast<int>(std::lerp(30.0f, 255.0f, t));
+          g = static_cast<int>(std::lerp(0.0f, 50.0f, t));
+          b = static_cast<int>(std::lerp(60.0f, 0.0f, t));
         } else {
           // 3. Lava Core (Blend Deep Red -> Bright Yellow)
           float t = std::min(1.0f, (field - 0.2f) / 0.8f);
           r = 255;
-          g = lerp(50, 220, t);  // Pushes towards yellow
+          g = static_cast<int>(std::lerp(50.0f, 220.0f, t));
           b = 0;
         }
 
@@ -201,10 +211,11 @@ class LavaLampAnimator {
         g = std::clamp(g + dither, 0, 255);
         b = std::clamp(b + dither, 0, 255);
 
-        renderBuffer[bufIdx++] = rgbTo565(r, g, b);
+        renderBuffer[bufIdx++] =
+            rgbTo565(static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b));
       }
     }
 
-    drawCallback(rectX, rectY, TILE_SIZE, TILE_SIZE, renderBuffer);
+    drawCallback(rectX, rectY, TILE_SIZE, TILE_SIZE, renderBuffer.data());
   }
 };

@@ -1,10 +1,11 @@
 #pragma once
 
 #include <esp_io_expander.h>
+#include <esp_io_expander_tca9554.h>
 #include <esp_lcd_st77916.h>
 
-#include "halpp/config_defaults.hpp"
 #include "hal/display/board_display.hpp"
+#include "halpp/config_defaults.hpp"
 
 namespace HAL {
 
@@ -13,8 +14,7 @@ namespace HAL {
 // ============================================================================
 namespace I2CConfig {
 // Onboard Device Addresses
-constexpr uint8_t ADDR_EXIO = 0x20;  // TCA9554 IO Expander
-constexpr uint8_t ADDR_RTC = 0x51;   // PCF85063A
+constexpr uint8_t ADDR_RTC = 0x51;  // PCF85063A
 }  // namespace I2CConfig
 
 // ============================================================================
@@ -74,6 +74,10 @@ struct config : detail::Defaults {
     static constexpr gpio_num_t PIN_SCL = GPIO_NUM_10;
   };
 
+  struct Exio : detail::Defaults::Exio {
+    static constexpr auto NEW_EXIO_FUNC = esp_io_expander_new_i2c_tca9554;
+  };
+
   struct Display : detail::Defaults::Display {
     static constexpr gpio_num_t PIN_TEARING_EFFECT = GPIO_NUM_18;
     static constexpr gpio_num_t PIN_BACKLIGHT_PWM = GPIO_NUM_5;
@@ -128,7 +132,7 @@ static_assert(GPIO_NUM_17 == HAL::SDCardConfig::PIN_CMD);
 static_assert(GPIO_NUM_18 == config::Display::PIN_TEARING_EFFECT);  // Tearing Effect (TE)
 static_assert(GPIO_NUM_19 == config::Usb::PIN_USB_DM);              // USB D-
 static_assert(GPIO_NUM_20 == config::Usb::PIN_USB_DP);              // USB D+
-static_assert(GPIO_NUM_21 == config::Display::PIN_CHIP_SELECT);      // Chip Select (CS)
+static_assert(GPIO_NUM_21 == config::Display::PIN_CHIP_SELECT);     // Chip Select (CS)
 
 // woah where are 22-32?
 

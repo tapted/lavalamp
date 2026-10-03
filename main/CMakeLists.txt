@@ -11,7 +11,6 @@ set(HALPP_SOURCES
 
 set(PROJECT_SOURCES
   "hal/display/board_display.cpp"
-  "hal/exio/board_exio.cpp"
   "hal/exio/exio.cpp"
   "lavalamp_display.cpp"
   "lavalamp.cpp"

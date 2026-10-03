@@ -1,6 +1,11 @@
-#include "exio.hpp"
+#include "hal/exio/exio.hpp"
 
-static const char* TAG = "EXIO";
+#include "halpp/config.hpp"
+#include "halpp/i2c/i2c_master.hpp"
+
+static constexpr const char TAG[] = "EXIO";
+
+using halpp::config;
 
 namespace HAL {
 
@@ -20,7 +25,8 @@ esp_err_t EXIO::init() {
     return ESP_OK;
   }
 
-  if (auto err = EspError::check(init_board_exio(), &handle)) {
+  if (EspError err = config::Exio::NEW_EXIO_FUNC(I2CMaster::instance().get_bus_handle(),
+                                                 config::Exio::I2C_ADDRESS, &handle)) {
     return err.log(TAG, "Failed to initialize EXIO device");
   }
 
@@ -46,7 +52,7 @@ esp_err_t EXIO::_deinit() {
   return ESP_OK;
 }
 
-EspResult<void> EXIO::set_pins_mode(uint32_t pin_num_mask, esp_io_expander_dir_t dir) {
+EspResult<> EXIO::set_pins_mode(uint32_t pin_num_mask, esp_io_expander_dir_t dir) {
   return esp_io_expander_set_dir(handle, pin_num_mask, dir);
 }
 
@@ -64,16 +70,16 @@ EspResult<uint32_t> EXIO::read_pins() {
   return EspResult<uint32_t>::ok(level_mask);
 }
 
-EspResult<void> EXIO::write_pin(uint8_t pin, bool state) {
+EspResult<> EXIO::write_pin(uint8_t pin, bool state) {
   if (pin == 0 || pin > 32) {
     ESP_LOGE(TAG, "Invalid pin number: %d. Must be between 1 and 32.", pin);
     return ESP_ERR_INVALID_ARG;
   }
-  EspResult<void> err = esp_io_expander_set_level(handle, 1 << (pin - 1), state ? 1 : 0);
+  EspResult<> err = esp_io_expander_set_level(handle, 1 << (pin - 1), state ? 1 : 0);
   return err.log_error(TAG, "Failed to write pin");
 }
 
-EspResult<void> EXIO::write_pins(uint32_t pin_mask, uint32_t levels) {
+EspResult<> EXIO::write_pins(uint32_t pin_mask, uint32_t levels) {
   // Isolate which pins in the mask need to be set HIGH / LOW
   uint32_t high_mask = pin_mask & levels;
   uint32_t low_mask = pin_mask & ~levels;

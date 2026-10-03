@@ -1,14 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <esp_err.h>
+#include <esp_io_expander.h>
 
 #include "espbase/esp_result.hpp"
-#include "esp_err.h"
-#include "esp_io_expander.h"
 
 namespace HAL {
-
-EspResult<esp_io_expander_handle_t> init_board_exio();
 
 class EXIO {
   static esp_io_expander_handle_t handle;
@@ -23,7 +21,7 @@ class EXIO {
   static esp_err_t deinit() { return handle ? instance()._deinit() : ESP_OK; }
 
   // pins: bitwise OR of IO_EXPANDER_PIN_NUM_XXX values.
-  EspResult<void> set_pins_mode(uint32_t pin_num_mask, esp_io_expander_dir_t dir);
+  EspResult<> set_pins_mode(uint32_t pin_num_mask, esp_io_expander_dir_t dir);
 
   /**
    * @brief Read a single pin level
@@ -45,7 +43,7 @@ class EXIO {
    * @param state Output state (true=high, false=low)
    * @return ESP_OK on success
    */
-  EspResult<void> write_pin(uint8_t pin, bool state);
+  EspResult<> write_pin(uint8_t pin, bool state);
 
   /**
    * @brief Set multiple pins output levels at once
@@ -53,7 +51,7 @@ class EXIO {
    * @param levels Bitmask of output levels for the specified pins
    * @return ESP_OK on success
    */
-  EspResult<void> write_pins(uint32_t pin_mask, uint32_t levels);
+  EspResult<> write_pins(uint32_t pin_mask, uint32_t levels);
 
  private:
   EXIO();

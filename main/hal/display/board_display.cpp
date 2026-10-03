@@ -5,8 +5,8 @@
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 
-#include "hal/exio/exio.hpp"
 #include "halpp/config.hpp"
+#include "halpp/exio/exio.hpp"
 
 static constexpr const char TAG[] = "BoardDisplay";
 static constexpr const st77916_lcd_init_cmd_t st77916_vendor_init_cmds[] = {

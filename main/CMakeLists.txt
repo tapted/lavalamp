@@ -4,14 +4,14 @@ set(HALPP_SOURCES
   "../deps/halpp/src/halpp/display/backlight.cpp"
   "../deps/halpp/src/halpp/display/display.cpp"
   "../deps/halpp/src/halpp/display/generic_display.cpp"
+  "../deps/halpp/src/halpp/exio/exio.cpp"
   "../deps/halpp/src/halpp/i2c/i2c_master.cpp"
   "../deps/halpp/src/halpp/ledc/channel.cpp"
   "../deps/halpp/src/halpp/ledc/timer.cpp"
-)
+  )
 
 set(PROJECT_SOURCES
   "hal/display/board_display.cpp"
-  "hal/exio/exio.cpp"
   "lavalamp_display.cpp"
   "lavalamp.cpp"
 )

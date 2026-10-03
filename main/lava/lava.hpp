@@ -147,6 +147,13 @@ class LavaLampAnimator {
     }
   }
 
+  void forceRedraw() {
+    // Marks all tiles as needing a redraw for the next frame
+    for (auto& row : previousLava) {
+      std::ranges::fill(row, true);
+    }
+  }
+
  private:
   template <typename DrawCallback>
   void renderTile(int tx, int ty, DrawCallback drawCallback) {

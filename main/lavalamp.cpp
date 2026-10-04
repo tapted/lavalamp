@@ -8,7 +8,7 @@ static constexpr const char TAG[] = "lavalamp";
 
 extern "C" void app_main(void) {
   check_crash_loop();
-  // delayed_pm_enable();
+  delayed_pm_enable({.boot_window_ms = 30000});
   start_ota_rollback_watchdog(2);
 
   init_lavalamp_display();

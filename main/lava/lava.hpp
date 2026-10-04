@@ -4,22 +4,24 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <esp_heap_caps.h>
 #include <esp_random.h>
 #include <limits>
 #include <random>
 #include <vector>
 
 #include "halpp/config.hpp"
+#include "halpp/display/display.hpp"
 
-constexpr int SCREEN_WIDTH = halpp::config::Display::WIDTH;
-constexpr int SCREEN_HEIGHT = halpp::config::Display::HEIGHT;
-constexpr int CENTER_X = SCREEN_WIDTH / 2;
-constexpr int CENTER_Y = SCREEN_HEIGHT / 2;
-constexpr int RADIUS = SCREEN_WIDTH / 2;
+constexpr uint16_t SCREEN_WIDTH = halpp::config::Display::WIDTH;
+constexpr uint16_t SCREEN_HEIGHT = halpp::config::Display::HEIGHT;
+constexpr uint16_t CENTER_X = SCREEN_WIDTH / 2;
+constexpr uint16_t CENTER_Y = SCREEN_HEIGHT / 2;
+constexpr uint16_t RADIUS = SCREEN_WIDTH / 2;
 
-constexpr int TILE_SIZE = 120;
-constexpr int GRID_W = SCREEN_WIDTH / TILE_SIZE;
-constexpr int GRID_H = SCREEN_HEIGHT / TILE_SIZE;
+constexpr uint16_t TILE_SIZE = 40;
+constexpr uint16_t GRID_W = SCREEN_WIDTH / TILE_SIZE;
+constexpr uint16_t GRID_H = SCREEN_HEIGHT / TILE_SIZE;
 
 static_assert(SCREEN_WIDTH % TILE_SIZE == 0, "SCREEN_WIDTH must be divisible by TILE_SIZE");
 static_assert(SCREEN_HEIGHT % TILE_SIZE == 0, "SCREEN_HEIGHT must be divisible by TILE_SIZE");
@@ -65,7 +67,8 @@ class LavaLampAnimator {
  private:
   std::vector<Blob> blobs;
   std::array<std::array<bool, GRID_W>, GRID_H> previousLava{};
-  std::array<uint16_t, TILE_SIZE * TILE_SIZE> renderBuffer{};
+  uint16_t* bufferA = nullptr;
+  uint16_t* bufferB = nullptr;
   float speedScale{0.3f};
 
  public:
@@ -97,6 +100,10 @@ class LavaLampAnimator {
     for (auto& row : previousLava) {
       std::ranges::fill(row, true);
     }
+    bufferA = static_cast<uint16_t*>(
+        heap_caps_malloc(TILE_SIZE * TILE_SIZE * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+    bufferB = static_cast<uint16_t*>(
+        heap_caps_malloc(TILE_SIZE * TILE_SIZE * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
   }
 
   template <typename DrawCallback>
@@ -136,10 +143,19 @@ class LavaLampAnimator {
     }
 
     // 3. Render tiles that either have lava now, OR had lava last frame (to clean up trails)
+
+    uint16_t* computeBuffer = bufferA;
+    uint16_t* dmaBuffer = bufferB;
     for (int ty = 0; ty < GRID_H; ++ty) {
       for (int tx = 0; tx < GRID_W; ++tx) {
         if (currentLava[ty][tx] || previousLava[ty][tx]) {
-          renderTile(tx, ty, drawCallback);
+          int rectX = tx * TILE_SIZE;
+          int rectY = ty * TILE_SIZE;
+
+          renderTile(rectX, rectY, drawCallback, computeBuffer);
+          halpp::Display::instance().ensure_flushed();
+          std::swap(computeBuffer, dmaBuffer);
+          drawCallback(rectX, rectY, TILE_SIZE, TILE_SIZE, dmaBuffer);
         }
         // Store state for next frame's trail cleanup
         previousLava[ty][tx] = currentLava[ty][tx];
@@ -156,9 +172,7 @@ class LavaLampAnimator {
 
  private:
   template <typename DrawCallback>
-  void renderTile(int tx, int ty, DrawCallback drawCallback) {
-    int rectX = tx * TILE_SIZE;
-    int rectY = ty * TILE_SIZE;
+  void renderTile(int rectX, int rectY, DrawCallback drawCallback, uint16_t* renderBuffer) {
     size_t bufIdx = 0;
 
     for (int py = 0; py < TILE_SIZE; ++py) {
@@ -222,7 +236,5 @@ class LavaLampAnimator {
             rgbTo565(static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b));
       }
     }
-
-    drawCallback(rectX, rectY, TILE_SIZE, TILE_SIZE, renderBuffer.data());
   }
 };

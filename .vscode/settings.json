@@ -10,9 +10,8 @@
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=c:\\Users\\tapte\\dev\\lavalamp\\build",
-    "--resource-dir=C:\\Espressif\\tools\\esp-clang\\esp-21.1.3_20260408\\esp-clang\\lib\\clang\\21"
+    "--compile-commands-dir=c:\\Users\\tapte\\dev\\lavalamp\\build"
   ],
   "idf.flashType": "UART",
-  "idf.port": "COM14"
+  "idf.port": "COM3"
 }

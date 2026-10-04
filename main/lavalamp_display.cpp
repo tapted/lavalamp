@@ -28,7 +28,7 @@ static std::optional<uint32_t> lava_step_function(MainLoopTask<int>&) {
     animator.forceRedraw();
   }
   was_ui_visible = is_ui_visible;
-  if (!is_ui_visible) {
+  if (!is_ui_visible && !halpp::Display::instance().is_lvgl_flushing()) {
     animator.updateAndRender([](int x, int y, int w, int h, uint16_t* buffer) {
       halpp::Display::instance().draw_bitmap(x, y, w, h, buffer);
     });
@@ -54,6 +54,7 @@ void init_lavalamp_display() {
     err.log(TAG, "Failed to initialize touch");
   }
 
+  halpp::Display::instance().begin_direct();
   lava_task.start(0, lava_step_function);
   backlight_controller = new BacklightController(set_backlight, config::Display::BACKLIGHT_DEFAULT);
   startup_gate_passed("Lavalamp ST77916 Display Initialized");

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <esp_heap_caps.h>
 #include <esp_random.h>
+#include <esp_timer.h>
 #include <limits>
 #include <random>
 #include <vector>
@@ -72,6 +73,12 @@ class LavaLampAnimator {
   float speedScale{0.3f};
 
  public:
+  uint64_t total_draw_time = 0;
+  uint64_t total_wait_for_dma_time = 0;
+  uint64_t total_idle_time = 0;
+  uint64_t last_clock_check = 0;
+
+ public:
   explicit LavaLampAnimator(int numBlobs = 5, float speedScale_ = 0.3f) : speedScale{speedScale_} {
     EspRandomGenerator gen;
 
@@ -109,6 +116,11 @@ class LavaLampAnimator {
   template <typename DrawCallback>
   void updateAndRender(DrawCallback drawCallback) {
     std::array<std::array<bool, GRID_W>, GRID_H> currentLava{};
+    if (last_clock_check != 0) {
+      uint64_t now = esp_timer_get_time();
+      total_idle_time += now - last_clock_check;
+      last_clock_check = now;
+    }
 
     // 1. Update Physics (Vertical Lava Flow)
     for (auto& blob : blobs) {
@@ -153,9 +165,21 @@ class LavaLampAnimator {
           int rectY = ty * TILE_SIZE;
 
           renderTile(rectX, rectY, drawCallback, computeBuffer);
+
+          uint64_t draw_end = esp_timer_get_time();
+          total_draw_time += draw_end - last_clock_check;
+          last_clock_check = draw_end;
+
           halpp::Display::instance().ensure_flushed();
+
+          uint64_t flush_end = esp_timer_get_time();
+          total_wait_for_dma_time += flush_end - last_clock_check;
+          last_clock_check = flush_end;
+
           std::swap(computeBuffer, dmaBuffer);
           drawCallback(rectX, rectY, TILE_SIZE, TILE_SIZE, dmaBuffer);
+
+          last_clock_check = esp_timer_get_time();
         }
         // Store state for next frame's trail cleanup
         previousLava[ty][tx] = currentLava[ty][tx];

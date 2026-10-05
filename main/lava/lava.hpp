@@ -70,6 +70,56 @@ constexpr std::array<BgColor, SCREEN_HEIGHT> generateBackgroundPalette() {
 // The compiler calculates the gradient and bakes it into Flash memory
 constexpr auto BACKGROUND_PALETTE = generateBackgroundPalette();
 
+struct RGB {
+  int r, g, b;
+};
+
+struct LavaPalette {
+  RGB edge;
+  RGB core;
+};
+
+// Converts HSV to RGB.
+// h = 0-360, s = 0.0-1.0, v = 0.0-1.0
+inline RGB hsv2rgb(float h, float s, float v) {
+  h = std::fmod(h, 360.0f);
+  if (h < 0.0f) h += 360.0f;
+
+  float c = v * s;
+  float x = c * (1.0f - std::abs(std::fmod(h / 60.0f, 2.0f) - 1.0f));
+  float m = v - c;
+
+  float rf = 0, gf = 0, bf = 0;
+  if (h < 60) {
+    rf = c;
+    gf = x;
+    bf = 0;
+  } else if (h < 120) {
+    rf = x;
+    gf = c;
+    bf = 0;
+  } else if (h < 180) {
+    rf = 0;
+    gf = c;
+    bf = x;
+  } else if (h < 240) {
+    rf = 0;
+    gf = x;
+    bf = c;
+  } else if (h < 300) {
+    rf = x;
+    gf = 0;
+    bf = c;
+  } else {
+    rf = c;
+    gf = 0;
+    bf = x;
+  }
+
+  return {static_cast<int>((rf + m) * 255.0f), static_cast<int>((gf + m) * 255.0f),
+          static_cast<int>((bf + m) * 255.0f)};
+}
+
 struct Blob {
   float x{0.0f}, y{0.0f};
   float vx{0.0f}, vy{0.0f};
@@ -89,9 +139,12 @@ class LavaLampAnimator {
   std::array<std::array<bool, GRID_W>, GRID_H> previousLava{};
   uint16_t* bufferA = nullptr;
   uint16_t* bufferB = nullptr;
-  float speedScale{0.3f};
 
  public:
+  float speedScale{0.3f};
+  float currentHue{0.0f};
+  float cycleColorSpeed{0};
+
   uint64_t total_draw_time = 0;
   uint64_t total_wait_for_dma_time = 0;
   uint64_t total_idle_time = 0;
@@ -99,29 +152,7 @@ class LavaLampAnimator {
 
  public:
   explicit LavaLampAnimator(int numBlobs = 5, float speedScale_ = 0.3f) : speedScale{speedScale_} {
-    EspRandomGenerator gen;
-
-    // Use modern distribution classes instead of modulo arithmetic and casting
-    std::uniform_real_distribution<float> xDist(
-        static_cast<float>(CENTER_X) - (SCREEN_WIDTH * 0.25f),
-        static_cast<float>(CENTER_X) + (SCREEN_WIDTH * 0.25f));
-    std::uniform_real_distribution<float> yDist(
-        static_cast<float>(CENTER_Y) - (SCREEN_HEIGHT * 0.375f),
-        static_cast<float>(CENTER_Y) + (SCREEN_HEIGHT * 0.375f));
-    std::uniform_real_distribution<float> vxDist(-0.333f, 0.333f);
-    std::uniform_real_distribution<float> vyDist(-1.0f, 1.0f);
-    std::uniform_real_distribution<float> rDist(50.0f, 95.0f);
-
-    blobs.reserve(static_cast<size_t>(numBlobs));
-    for (int i = 0; i < numBlobs; ++i) {
-      Blob b;
-      b.x = xDist(gen);
-      b.y = yDist(gen);
-      b.vx = vxDist(gen);
-      b.vy = vyDist(gen);
-      b.setRadius(rDist(gen));
-      blobs.push_back(b);
-    }
+    setBlobCount(numBlobs, 70);
 
     for (auto& row : previousLava) {
       std::ranges::fill(row, true);
@@ -132,8 +163,47 @@ class LavaLampAnimator {
         heap_caps_malloc(TILE_SIZE * TILE_SIZE * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
   }
 
+  void setBlobCount(int numBlobs, float blobRadius) {
+    EspRandomGenerator gen;
+    // Use modern distribution classes instead of modulo arithmetic and casting
+    std::uniform_real_distribution<float> xDist(
+        static_cast<float>(CENTER_X) - (SCREEN_WIDTH * 0.25f),
+        static_cast<float>(CENTER_X) + (SCREEN_WIDTH * 0.25f));
+    std::uniform_real_distribution<float> yDist(
+        static_cast<float>(CENTER_Y) - (SCREEN_HEIGHT * 0.375f),
+        static_cast<float>(CENTER_Y) + (SCREEN_HEIGHT * 0.375f));
+    std::uniform_real_distribution<float> vxDist(-0.333f, 0.333f);
+    std::uniform_real_distribution<float> vyDist(-1.0f, 1.0f);
+    std::uniform_real_distribution<float> rDist(blobRadius - 20.0f, blobRadius + 25.0f);
+
+    blobs.clear();
+    blobs.reserve(static_cast<size_t>(numBlobs));
+    for (int i = 0; i < numBlobs; ++i) {
+      Blob b;
+      b.x = xDist(gen);
+      b.y = yDist(gen);
+      b.vx = vxDist(gen);
+      b.vy = vyDist(gen);
+      b.setRadius(rDist(gen));
+      blobs.push_back(b);
+    }
+  }
+
   template <typename DrawCallback>
   void updateAndRender(DrawCallback drawCallback) {
+    LavaPalette palette = {.edge = {255, 50, 0}, .core = {255, 220, 0}};
+
+    if (cycleColorSpeed > 0.0f) {
+      // Slowly rotate the color wheel. (Multiply by speedScale so it pauses when UI is active)
+      currentHue += (cycleColorSpeed * speedScale);
+      if (currentHue >= 360.0f) currentHue -= 360.0f;
+
+      // Edge color: Deep and highly saturated
+      palette.edge = hsv2rgb(currentHue, 1.0f, 0.9f);
+      // Core color: Shift hue by +50 degrees, lower saturation (closer to white), max brightness
+      palette.core = hsv2rgb(currentHue + 50.0f, 0.5f, 1.0f);
+    }
+
     std::array<std::array<bool, GRID_W>, GRID_H> currentLava{};
     if (last_clock_check != 0) {
       uint64_t now = esp_timer_get_time();
@@ -183,7 +253,7 @@ class LavaLampAnimator {
           int rectX = tx * TILE_SIZE;
           int rectY = ty * TILE_SIZE;
 
-          renderTile(rectX, rectY, drawCallback, computeBuffer);
+          renderTile(rectX, rectY, drawCallback, computeBuffer, palette);
 
           uint64_t draw_end = esp_timer_get_time();
           total_draw_time += draw_end - last_clock_check;
@@ -215,7 +285,8 @@ class LavaLampAnimator {
 
  private:
   template <typename DrawCallback>
-  void renderTile(int rectX, int rectY, DrawCallback drawCallback, uint16_t* renderBuffer) {
+  void renderTile(int rectX, int rectY, DrawCallback drawCallback, uint16_t* renderBuffer,
+                  const LavaPalette& p) {
     size_t bufIdx = 0;
 
     // 1. TILE-LEVEL CULLING
@@ -294,18 +365,18 @@ class LavaLampAnimator {
           g = 0;
           b = bgB;
         } else if (field < 0.2f) {
-          // 2. Anti-aliased Lava Edge (Blend Background -> Deep Red)
-          float t = (field - 0.1f) * 10.0f;  // * 10 is faster than / 0.1
-          r = bgR + static_cast<int>(t * (255.0f - bgR));
-          g = static_cast<int>(t * 50.0f);
-          b = bgB - static_cast<int>(t * bgB);
+          // 2. Anti-aliased Lava Edge (Blend Background -> Deep Red) (Background -> Lava Edge)
+          float t = (field - 0.1f) * 10.0f;
+          r = bgR + static_cast<int>(t * (p.edge.r - bgR));
+          g = static_cast<int>(t * p.edge.g);  // Assumes bgG is 0
+          b = bgB + static_cast<int>(t * (p.edge.b - bgB));
         } else {
-          // 3. Lava Core (Blend Deep Red -> Bright Yellow)
-          float t = (field - 0.2f) * 1.25f;  // * 1.25 is faster than / 0.8
+          // 3. Lava Core (Blend Deep Red -> Bright Yellow) (Lava Edge -> Bright Lava Core)
+          float t = (field - 0.2f) * 1.25f;
           if (t > 1.0f) t = 1.0f;
-          r = 255;
-          g = 50 + static_cast<int>(t * 170.0f);
-          b = 0;
+          r = p.edge.r + static_cast<int>(t * (p.core.r - p.edge.r));
+          g = p.edge.g + static_cast<int>(t * (p.core.g - p.edge.g));
+          b = p.edge.b + static_cast<int>(t * (p.core.b - p.edge.b));
         }
 
         // Dither and write

@@ -17,7 +17,7 @@ using halpp::config;
 static constexpr char TAG[] = "LavalampDisplay";
 
 static constinit MainLoopTask<int> lava_task;
-static LavaLampAnimator animator(5);  // 5 organic blobs
+static LavaLampAnimator animator(3);  // 3 organic blobs
 static BacklightController* backlight_controller = nullptr;
 static constinit halpp::display::Touch touch;
 
@@ -45,7 +45,7 @@ static std::optional<uint32_t> lava_step_function(MainLoopTask<int>&) {
              frames, frames / (total_time / 1000000.0f), (idle_time / total_time) * 100.0f,
              (draw_time / total_time) * 100.0f, (wait_for_dma_time / total_time) * 100.0f);
   }
-  return 30;
+  return 120;
 }
 
 static void set_backlight(int brightness) {

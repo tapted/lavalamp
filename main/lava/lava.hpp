@@ -52,6 +52,24 @@ constexpr std::array<std::array<int, 4>, 4> bayer4x4 = {{
     {15, 7, 13, 5},
 }};
 
+struct BgColor {
+  uint8_t r, g, b;
+};
+
+constexpr std::array<BgColor, SCREEN_HEIGHT> generateBackgroundPalette() {
+  std::array<BgColor, SCREEN_HEIGHT> palette{};
+  for (int y = 0; y < SCREEN_HEIGHT; ++y) {
+    float bgMap = static_cast<float>(y) / static_cast<float>(SCREEN_HEIGHT);
+    palette[y].r = static_cast<uint8_t>(30.0f + bgMap * (5.0f - 30.0f));
+    palette[y].g = 0;
+    palette[y].b = static_cast<uint8_t>(60.0f + bgMap * (15.0f - 60.0f));
+  }
+  return palette;
+}
+
+// The compiler calculates the gradient and bakes it into Flash memory
+constexpr auto BACKGROUND_PALETTE = generateBackgroundPalette();
+
 struct Blob {
   float x{0.0f}, y{0.0f};
   float vx{0.0f}, vy{0.0f};
@@ -218,10 +236,8 @@ class LavaLampAnimator {
       int dy_center_sq = dy_center * dy_center;
 
       // 2. Y-AXIS HOISTING
-      // The background color is identical for the entire row, compute it ONCE.
-      float bgMap = static_cast<float>(y) / static_cast<float>(SCREEN_HEIGHT);
-      int bgR = static_cast<int>(30.0f + bgMap * (5.0f - 30.0f));
-      int bgB = static_cast<int>(60.0f + bgMap * (15.0f - 60.0f));
+      int bgR = BACKGROUND_PALETTE[y].r;
+      int bgB = BACKGROUND_PALETTE[y].b;
 
       const auto& bayer_row = bayer4x4[y & 3];  // fast modulo
 

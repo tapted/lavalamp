@@ -14,5 +14,5 @@
     "--resource-dir=C:\\Espressif\\tools\\esp-clang\\esp-21.1.3_20260408\\esp-clang\\lib\\clang\\21"
   ],
   "idf.flashType": "UART",
-  "idf.port": "COM3"
+  "idf.port": "COM14"
 }

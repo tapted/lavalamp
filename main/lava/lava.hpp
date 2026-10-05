@@ -38,10 +38,11 @@ struct EspRandomGenerator {
 constexpr uint16_t rgbTo565(uint8_t r, uint8_t g, uint8_t b) {
   uint16_t rgb = static_cast<uint16_t>(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 
-  if (halpp::config::lvgl::USE_RGB565_SWAPPED) {
+  if constexpr (halpp::config::lvgl::USE_RGB565_SWAPPED) {
     return static_cast<uint16_t>((rgb << 8) | (rgb >> 8));
+  } else {
+    return rgb;
   }
-  return rgb;
 }
 
 constexpr std::array<std::array<int, 4>, 4> bayer4x4 = {{
@@ -199,11 +200,51 @@ class LavaLampAnimator {
   void renderTile(int rectX, int rectY, DrawCallback drawCallback, uint16_t* renderBuffer) {
     size_t bufIdx = 0;
 
+    // 1. TILE-LEVEL CULLING
+    // Find only the blobs that intersect this specific 40x40 tile
+    const Blob* activeBlobs[32];  // Max 32 blobs safely kept on the stack
+    int numActiveBlobs = 0;
+
+    for (const auto& blob : blobs) {
+      if (blob.x + blob.radius >= rectX && blob.x - blob.radius < rectX + TILE_SIZE &&
+          blob.y + blob.radius >= rectY && blob.y - blob.radius < rectY + TILE_SIZE) {
+        if (numActiveBlobs < 32) activeBlobs[numActiveBlobs++] = &blob;
+      }
+    }
+
     for (int py = 0; py < TILE_SIZE; ++py) {
       int y = rectY + py;
       int dy_center = y - CENTER_Y;
       int dy_center_sq = dy_center * dy_center;
 
+      // 2. Y-AXIS HOISTING
+      // The background color is identical for the entire row, compute it ONCE.
+      float bgMap = static_cast<float>(y) / static_cast<float>(SCREEN_HEIGHT);
+      int bgR = static_cast<int>(30.0f + bgMap * (5.0f - 30.0f));
+      int bgB = static_cast<int>(60.0f + bgMap * (15.0f - 60.0f));
+
+      const auto& bayer_row = bayer4x4[y & 3];  // fast modulo
+
+      // 3. ROW-LEVEL CULLING
+      // Find which of the active blobs actually intersect this specific row Y
+      struct RowBlob {
+        float x, dy_sq, rSq, invRSq;
+      };
+      RowBlob rowBlobs[32];
+      int numRowBlobs = 0;
+
+      for (int i = 0; i < numActiveBlobs; ++i) {
+        const Blob* b = activeBlobs[i];
+        float dy = static_cast<float>(y) - b->y;
+        float dy_sq = dy * dy;
+
+        // If the vertical distance alone exceeds the radius, skip it for the whole row!
+        if (dy_sq < b->rSq) {
+          rowBlobs[numRowBlobs++] = {b->x, dy_sq, b->rSq, b->invRSq};
+        }
+      }
+
+      // 4. THE FAST INNER LOOP
       for (int px = 0; px < TILE_SIZE; ++px) {
         int x = rectX + px;
 
@@ -216,45 +257,60 @@ class LavaLampAnimator {
 
         // Calculate finite-support metaball field
         float field = 0.0f;
-        for (const auto& blob : blobs) {
-          float dx = static_cast<float>(x) - blob.x;
-          float dy = static_cast<float>(y) - blob.y;
-          float distSq = dx * dx + dy * dy;
+        for (int i = 0; i < numRowBlobs; ++i) {
+          const RowBlob& rb = rowBlobs[i];
+          float dx = static_cast<float>(x) - rb.x;
+          float distSq = dx * dx + rb.dy_sq;  // dy_sq was precalculated!
 
-          if (distSq < blob.rSq) {
+          if (distSq < rb.rSq) {
             // Wyvill-inspired polynomial curve. Bounded perfectly to radius!
-            float v = 1.0f - (distSq * blob.invRSq);
-            field += v * v * v;  // Smooth cubic falloff
+            float v = 1.0f - (distSq * rb.invRSq);
+            field += v * v * v;
           }
         }
 
-        int r = 0, g = 0, b = 0;
+        int r, g, b;
 
+        // Fast-math color palette (Replaces std::lerp overhead)
         if (field < 0.1f) {
           // 1. Background gradient (Deep Purple to Black)
-          float bgMap = static_cast<float>(y) / static_cast<float>(SCREEN_HEIGHT);
-          r = static_cast<int>(std::lerp(30.0f, 5.0f, bgMap));
+          r = bgR;
           g = 0;
-          b = static_cast<int>(std::lerp(60.0f, 15.0f, bgMap));
+          b = bgB;
         } else if (field < 0.2f) {
           // 2. Anti-aliased Lava Edge (Blend Background -> Deep Red)
-          float t = (field - 0.1f) / 0.1f;
-          r = static_cast<int>(std::lerp(30.0f, 255.0f, t));
-          g = static_cast<int>(std::lerp(0.0f, 50.0f, t));
-          b = static_cast<int>(std::lerp(60.0f, 0.0f, t));
+          float t = (field - 0.1f) * 10.0f;  // * 10 is faster than / 0.1
+          r = bgR + static_cast<int>(t * (255.0f - bgR));
+          g = static_cast<int>(t * 50.0f);
+          b = bgB - static_cast<int>(t * bgB);
         } else {
           // 3. Lava Core (Blend Deep Red -> Bright Yellow)
-          float t = std::min(1.0f, (field - 0.2f) / 0.8f);
+          float t = (field - 0.2f) * 1.25f;  // * 1.25 is faster than / 0.8
+          if (t > 1.0f) t = 1.0f;
           r = 255;
-          g = static_cast<int>(std::lerp(50.0f, 220.0f, t));
+          g = 50 + static_cast<int>(t * 170.0f);
           b = 0;
         }
 
         // Dither and write
-        int dither = bayer4x4[y % 4][x % 4] - 8;
-        r = std::clamp(r + dither, 0, 255);
-        g = std::clamp(g + dither, 0, 255);
-        b = std::clamp(b + dither, 0, 255);
+        int dither = bayer_row[x & 3] - 8;
+        r += dither;
+        g += dither;
+        b += dither;
+
+        // Fast integer clamping (Branching is significantly faster than std::clamp)
+        if (r > 255)
+          r = 255;
+        else if (r < 0)
+          r = 0;
+        if (g > 255)
+          g = 255;
+        else if (g < 0)
+          g = 0;
+        if (b > 255)
+          b = 255;
+        else if (b < 0)
+          b = 0;
 
         renderBuffer[bufIdx++] =
             rgbTo565(static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b));

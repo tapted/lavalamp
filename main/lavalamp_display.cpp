@@ -45,7 +45,7 @@ static std::optional<uint32_t> lava_step_function(MainLoopTask<int>&) {
              frames, frames / (total_time / 1000000.0f), (idle_time / total_time) * 100.0f,
              (draw_time / total_time) * 100.0f, (wait_for_dma_time / total_time) * 100.0f);
   }
-  return 15;
+  return 30;
 }
 
 static void set_backlight(int brightness) {

@@ -33,6 +33,7 @@ static std::optional<uint32_t> lava_step_function(MainLoopTask<int>&) {
   was_ui_visible = is_ui_visible;
   if (!is_ui_visible && !halpp::Display::instance().is_lvgl_flushing()) {
     animator.updateAndRender([](int x, int y, int w, int h, uint16_t* buffer) {
+      halpp::Display::instance().ensure_flushed();
       halpp::Display::instance().draw_bitmap(x, y, w, h, buffer);
     });
   }

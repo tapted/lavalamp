@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "halpp/config.hpp"
-#include "halpp/display/display.hpp"
 
 constexpr uint16_t SCREEN_WIDTH = halpp::config::Display::WIDTH;
 constexpr uint16_t SCREEN_HEIGHT = halpp::config::Display::HEIGHT;
@@ -191,6 +190,10 @@ class LavaLampAnimator {
 
   template <typename DrawCallback>
   void updateAndRender(DrawCallback drawCallback) {
+    uint64_t now = esp_timer_get_time();
+    if (last_clock_check != 0) total_idle_time += now - last_clock_check;
+    last_clock_check = now;
+
     LavaPalette palette = {.edge = {255, 50, 0}, .core = {255, 220, 0}};
 
     if (cycleColorSpeed > 0.0f) {
@@ -205,11 +208,6 @@ class LavaLampAnimator {
     }
 
     std::array<std::array<bool, GRID_W>, GRID_H> currentLava{};
-    if (last_clock_check != 0) {
-      uint64_t now = esp_timer_get_time();
-      total_idle_time += now - last_clock_check;
-      last_clock_check = now;
-    }
 
     // 1. Update Physics (Vertical Lava Flow)
     for (auto& blob : blobs) {
@@ -246,7 +244,7 @@ class LavaLampAnimator {
     // 3. Render tiles that either have lava now, OR had lava last frame (to clean up trails)
 
     uint16_t* computeBuffer = bufferA;
-    uint16_t* dmaBuffer = bufferB;
+    uint16_t* busyBuffer = bufferB;
     for (int ty = 0; ty < GRID_H; ++ty) {
       for (int tx = 0; tx < GRID_W; ++tx) {
         if (currentLava[ty][tx] || previousLava[ty][tx]) {
@@ -259,16 +257,12 @@ class LavaLampAnimator {
           total_draw_time += draw_end - last_clock_check;
           last_clock_check = draw_end;
 
-          halpp::Display::instance().ensure_flushed();
+          drawCallback(rectX, rectY, TILE_SIZE, TILE_SIZE, computeBuffer);
+          std::swap(computeBuffer, busyBuffer);
 
           uint64_t flush_end = esp_timer_get_time();
           total_wait_for_dma_time += flush_end - last_clock_check;
           last_clock_check = flush_end;
-
-          std::swap(computeBuffer, dmaBuffer);
-          drawCallback(rectX, rectY, TILE_SIZE, TILE_SIZE, dmaBuffer);
-
-          last_clock_check = esp_timer_get_time();
         }
         // Store state for next frame's trail cleanup
         previousLava[ty][tx] = currentLava[ty][tx];
